@@ -228,7 +228,3 @@ main.py           # MVAD loading, model fitting, Figure 3
   doi     = {10.1111/rssa.12712}
 }
 ```
-
-## License
-
-Add your license of choice here (for example MIT). The original paper is open access under CC BY.
