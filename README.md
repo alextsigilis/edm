@@ -9,9 +9,7 @@ A PyTorch reimplementation of the **MEDseq** model family from
 
 The paper fits its models with an ECM algorithm. This project fits all eight MEDseq variants by gradient descent instead, using autodiff and Adam. To make the discrete central sequences differentiable, each one is relaxed to a *soft*, temperature-controlled one-hot sequence. The included `main.py` reproduces the paper's Figure 3 on the MVAD school-to-work data.
 
-<p align="center">
-  <img src="results/figure3_bic.png" width="560" alt="BIC across MEDseq model types and numbers of components">
-</p>
+![results](results/figure3_bic.png)
 
 ---
 
