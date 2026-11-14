@@ -18,6 +18,14 @@
 - **`EDModel.sample_components(n)` and `BaseEDM.sample_components(n, hard=True)`.** These draw `n` sequences from each non-noise component and return a tensor of shape `(K, n, T)`. Set `hard=False` to sample the soft-θ̃ components used in training.
 - **`main.py` options** `--normalizer {hamming,exact,sampled}` and `--mc-samples N`.
 - **`edm.NORMALIZERS`**, the tuple of valid normaliser names.
+- **`compare_normalizers.py`.** For one model type (`--type`, default UUN), it sweeps G = 5..15 (`--g-min`, `--g-max`) and fits each G with the `hamming`, `exact` and `sampled` normalisers, using the same seed. It saves `results/normalizers_<TYPE>.csv` and `.png`, prints the BIC table and each normaliser's best G, and opens the BIC-versus-G plot (`--no-show` turns that off). `--plot-only` re-plots a saved table.
+- **Cluster plot in `compare_normalizers.py`, after Figure 7 of Murphy et al. (2021).** For each normaliser, the model at its BIC-optimal G is drawn as one panel. Each of the n = 712 observed sequences is one row, coloured by state, and rows are grouped by MAP cluster with the noise component last.
+  - **Ordering.** Clusters are seriated by their central sequences. Rows within a cluster start from the member nearest the central sequence and follow a greedy nearest-neighbour chain on Hamming distance, which approximates the paper's TSP seriation.
+  - **Labels.** Long SPS labels wrap after three spells and are spread apart with leader lines.
+  - **Output.** The figure is saved as `results/normalizers_<TYPE>_clusters.png`. A table of cluster sizes and mean months per state is printed for each panel.
+  - **Stored settings.** The sweep table now records the fit settings (covariates, weights, gate, `mc_samples`, restarts, epochs, lr, seed). `--plot-only` uses them to refit the three best models deterministically, without rerunning the sweep.
+  - **Example figures.** The README shows `results/normalizers_UUN.png` and `results/normalizers_UUN_clusters.png` from a default UUN run, with notes on what they show.
+  - **Colours.** SC is blue, EM green, TR magenta and JL yellow, as in the paper; FE is aqua and HE red. No set of six hues separates every pair. The closest pair (magenta and red) goes to TR and HE, which rarely border each other, and the SPS labels and the printed table repeat the information as text.
 - **Tests: `tests/test_sampled_normalizer.py`.** They use the standard-library `unittest`, run in about a second, and are run with `python -m unittest discover tests`. They check that:
   - the sampled gradient is unbiased, for log Z alone and for the full mixture loss, on UUN and CC models. The mean of 300 estimates must match the closed-form gradient with standard-normal z-scores. Parameters that do not reach log Z must match exactly.
   - the error shrinks roughly as 1/√S as `mc_samples` grows.

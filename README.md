@@ -106,6 +106,47 @@ A full run fits roughly 190 (type, G) combinations, each with several restarts. 
 | `--plot-only TABLE` | — | Skip fitting and plot a saved table |
 | `--show` | off | Also open the figure in a window |
 
+### Comparing the normalisers
+
+`compare_normalizers.py` fits one model type for each G from 5 to 15, once with each normaliser (`hamming`, `exact`, `sampled`). All three fits for a given G use the same seed, so they start from the same initialisation and differ only in the normaliser used during training. The script then opens two figures:
+
+- **BIC against G**, with one line per normaliser.
+- **Clusters at each normaliser's best G**, one panel per normaliser, in the style of the paper's Figure 7.
+  - Each of the 712 sequences is one row, coloured by state over time.
+  - Rows are grouped by MAP cluster. Similar sequences sit next to each other, ordered by a nearest-neighbour seriation on Hamming distance.
+  - The noise component is last.
+  - Cluster numbers are on the left, and each central sequence's SPS label is on the right.
+  - For each panel the script also prints a table of cluster sizes and the mean months spent in each state.
+
+```bash
+python compare_normalizers.py --type UUN
+python compare_normalizers.py --type CU --covariates none --g-min 3 --g-max 10
+python compare_normalizers.py --plot-only results/normalizers_UUN.csv   # re-plot without the sweep
+```
+
+- **Outputs.** The script writes:
+  - `results/normalizers_<TYPE>.csv`: one row per (G, normaliser), including the fit settings.
+  - `results/normalizers_<TYPE>.png`: the BIC curves.
+  - `results/normalizers_<TYPE>_clusters.png`: the cluster panels.
+
+  It also prints the BIC table and each normaliser's best G.
+- **Re-plotting.** `--plot-only` skips the sweep. It refits only the three best models, using the settings stored in the table. The seed is the same, so the refitted models are identical to the originals.
+- **Options.** It accepts the same data and training options as `main.py`, plus `--mc-samples` and `--no-show`.
+
+#### Example: UUN on MVAD
+
+These figures come from `python compare_normalizers.py --type UUN` with the default options: all covariates, sampling weights, 3 restarts and 600 epochs.
+
+![BIC against G for the hamming, exact and sampled normalisers](results/normalizers_UUN.png)
+
+All three normalisers select G = 10, but hamming has the best BIC at every G. Sampled is 8–13k lower and exact is 26–33k lower. BIC is always computed from hard central sequences. The exact objective keeps θ̃ soft during training, and hardening it for reporting loses a lot of likelihood. Sampled follows the exact gradient on average, but its noisier gradient makes less use of the softness, so it ends up in between.
+
+![Clusters of the BIC-optimal UUN model for each normaliser, in the style of Figure 7](results/normalizers_UUN_clusters.png)
+
+- **Hamming** recovers the main clusters of the paper's Figure 7, for example (SC,25)-(HE,45), (FE,25)-(HE,45), (TR,22)-(EM,48) and (FE,22)-(EM,48), and assigns only 14 sequences to noise.
+- **Exact** assigns 149 sequences to the noise component, because its hardened clusters fit them poorly.
+- **Sampled** finds similar groups, but its central sequences are fragmented where cluster members disagree.
+
 ---
 
 ## Python API
