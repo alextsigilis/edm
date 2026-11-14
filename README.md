@@ -96,6 +96,8 @@ A full run fits roughly 190 (type, G) combinations, each with several restarts. 
 | `--covariates` | `all` | `all`, `none`, or names such as `GCSE5eq,Gender` |
 | `--no-weights` | off | Ignore the sampling weights |
 | `--gated-noise` | off | Use the GN gate instead of NGN |
+| `--normalizer` | `hamming` | `hamming`, `exact` or `sampled` (see [Normaliser options](#how-the-gradient-descent-version-works)) |
+| `--mc-samples` | `32` | Sequences drawn per component per step with `--normalizer sampled` |
 | `--n-init` | `3` | Random restarts per fit |
 | `--epochs` | `600` | Training epochs per restart |
 | `--lr` | `0.05` | Adam learning rate |
@@ -127,7 +129,9 @@ model.gating_coefficients()    # intercept + slopes, relative to component 0
 best, table = select_by_bic(S, n_states=6, n_components=range(2, 15), weights=w, covariates=x)
 ```
 
-`EDModel` also accepts these model options as keyword arguments: `gated_noise`, `normalizer` (`"hamming"` or `"exact"`), `straight_through` and `init_precision`.
+`EDModel` also accepts these model options as keyword arguments: `gated_noise`, `normalizer` (`"hamming"`, `"exact"` or `"sampled"`), `mc_samples`, `straight_through` and `init_precision`.
+
+`model.sample_components(n)` draws `n` sequences from each fitted non-noise component and returns a tensor of shape `(K, n, T)`.
 
 `fit` also accepts these training options: `temperature=(start, end)`, `anneal_frac`, `batch_size`, `tol`, `patience`, `noise_init`, `collapse`, `seed`, `device`, `dtype` and `verbose`.
 
@@ -168,9 +172,14 @@ Here K is the number of non-noise components: K = G for the first four types and
 - **Normaliser options.**
   - `"hamming"` (default) keeps the paper's constant. For soft θ̃, the objective is then a lower bound on the log-likelihood of a proper distribution, and the bound is exact when θ̃ is one-hot. For fixed responsibilities and λ the objective is linear in θ̃, so its maximiser is the weighted modal sequence, exactly the paper's CM-step for θ.
   - `"exact"` uses the exact normaliser for soft θ̃, ∏_t Σ_k exp(−λ_{g,t}(1 − θ̃_{g,t,k})).
+  - `"sampled"` keeps the value of the `"exact"` normaliser but does not differentiate its closed form. Instead it estimates the gradient by Monte Carlo, using equation 18.13 of Goodfellow, Bengio & Courville, *[Deep Learning](https://www.deeplearningbook.org/contents/partition.html)*: ∇ log Z_g = E_{s∼f_g}[∇ log f̃_g(s)], where log f̃_g is the unnormalised log-density.
+    - Every training step draws `mc_samples` sequences from each component (the "negative phase") and averages ∇ log f̃_g over them.
+    - Each component is a product of independent categoricals over time, so the samples are exact and no Markov chain is needed.
+    - The estimate is unbiased for the `"exact"` gradient.
+    - The forward value stays exact, because the responsibilities, the loss and early stopping all need log Z_g itself.
 - **Precisions** are parameterised as λ = softplus(ρ) ≥ 0.
 - **Objective.** Adam maximises the weighted pseudo log-likelihood (1/n) Σᵢ wᵢ log f(sᵢ).
-- **Reporting.** Final log-likelihoods and BIC are computed with hard central sequences θ = argmax φ, where both normalisers coincide.
+- **Reporting.** Final log-likelihoods and BIC are computed with hard central sequences θ = argmax φ, where all three normalisers coincide.
 - **Gating.**
   - The mixing proportions follow a multinomial logit in the covariates, with component 0 as the reference.
   - Under NGN, the noise probability τ₀ is constant and the covariates only affect the non-noise components.
@@ -193,8 +202,20 @@ edm/
 ├── cc.py  uc.py  cu.py  uu.py     # precision structure of each model type
 ├── ccn.py ucn.py cun.py uun.py    # the same with a uniform noise component
 └── model.py      # EDModel (fit / predict / bic) and select_by_bic
+tests/
+└── test_sampled_normalizer.py   # Monte Carlo log Z gradient (normalizer="sampled")
 main.py           # MVAD loading, model fitting, Figure 3
 ```
+
+### Tests
+
+The tests use only the standard library's `unittest` and take about a second. Run them from the repository root:
+
+```bash
+python -m unittest discover tests
+```
+
+`pytest tests` also works if you have pytest installed.
 
 ---
 

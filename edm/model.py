@@ -38,7 +38,8 @@ class EDModel(nn.Module):
 
     Components are indexed 0..G-1; for noise types the noise component is the last one.
     Extra keyword arguments go to the underlying model:
-    gated_noise, normalizer, straight_through, init_precision.
+    gated_noise, normalizer ("hamming", "exact" or "sampled"), mc_samples, straight_through,
+    init_precision.
     Covariates must be numeric (n, r), e.g. 0/1 dummies with reference levels dropped.
     """
 
@@ -109,10 +110,12 @@ class EDModel(nn.Module):
             gen = None if seed is None else torch.Generator(device=device).manual_seed(seed + run)
             model = MODEL_REGISTRY[self.edm_type](**self._kwargs).to(device=device, dtype=dtype)
             model.initialize(X, w_fit, generator=gen, noise_init=noise_init)
+            model.generator = gen                  # Monte Carlo draws for normalizer="sampled"
             history = self._train(model, X, w_fit, cov_fit, epochs=epochs, lr=lr,
                                   temperature=temperature, anneal_frac=anneal_frac,
                                   batch_size=batch_size, tol=tol, patience=patience,
                                   verbose=verbose, generator=gen)
+            model.generator = None
             with torch.no_grad():
                 ll = (w_fit * model(X, cov_fit, hard=True)).sum().item()
             if verbose:
@@ -199,6 +202,10 @@ class EDModel(nn.Module):
 
     def central_sequences(self) -> torch.Tensor:
         return self.model.central_sequences()
+
+    def sample_components(self, n: int, generator=None) -> torch.Tensor:
+        """n sequences drawn from each fitted non-noise component, shape (K, n, T)."""
+        return self.model.sample_components(n, hard=True, generator=generator)
 
     def precision(self) -> torch.Tensor:
         return self.model.precision().detach()

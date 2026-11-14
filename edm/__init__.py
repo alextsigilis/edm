@@ -1,6 +1,6 @@
 """PyTorch port of the MEDseq family (Murphy, Murphy, Piccarreta & Gormley, 2021)."""
 from .types import EDMType
-from .base import BaseEDM
+from .base import NORMALIZERS, BaseEDM
 from .cc import CCModel
 from .uc import UCModel
 from .cu import CUModel
@@ -12,7 +12,7 @@ from .uun import UUNModel
 from .model import EDModel, MODEL_REGISTRY, select_by_bic
 
 __all__ = [
-    "EDMType", "BaseEDM", "EDModel", "MODEL_REGISTRY", "select_by_bic",
+    "EDMType", "BaseEDM", "EDModel", "MODEL_REGISTRY", "NORMALIZERS", "select_by_bic",
     "CCModel", "UCModel", "CUModel", "UUModel",
     "CCNModel", "UCNModel", "CUNModel", "UUNModel",
 ]

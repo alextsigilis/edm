@@ -12,8 +12,16 @@ normalizer="hamming": the paper's closed-form constant. For soft θ̃ the object
     responsibilities and λ) is linear in θ̃, so its maximiser is the weighted modal sequence.
 normalizer="exact": Σ_t log Σ_k exp(-λ_{g,t}(1 - θ̃_{g,t,k})), the exact constant for soft θ̃.
     Components become a richer product-of-categoricals family; annealing τ makes θ̃ one-hot.
+normalizer="sampled": the same value as "exact", but the gradient of log Z_g is not taken
+    through the closed form. It is estimated by Monte Carlo with the identity of
+    Goodfellow, Bengio & Courville (2016), Deep Learning, eq. 18.13:
 
-Both coincide for one-hot θ̃, which is how log-likelihoods and BIC are reported.
+        ∇ log Z_g = E_{s ~ f_g}[∇ log f̃_g(s)],   log f̃_g(s) = -Σ_t λ_{g,t}(1 - <x_t, θ̃_{g,t}>)
+
+    with mc_samples sequences drawn from each component on every forward pass that needs a
+    gradient. The estimate is unbiased for the gradient of the "exact" normaliser.
+
+All three coincide for one-hot θ̃, which is how log-likelihoods and BIC are reported.
 """
 from __future__ import annotations
 
@@ -26,6 +34,8 @@ import torch.nn.functional as F
 from .gating import GatingNetwork
 from .types import EDMType
 from .utils import weighted_kmodes
+
+NORMALIZERS = ("hamming", "exact", "sampled")
 
 
 class BaseEDM(nn.Module):
@@ -48,12 +58,15 @@ class BaseEDM(nn.Module):
         normalizer: str = "hamming",
         straight_through: bool = False,
         init_precision: float = 1.0,
+        mc_samples: int = 32,
     ):
         super().__init__()
         if n_states < 2:
             raise ValueError("need at least 2 states")
-        if normalizer not in ("hamming", "exact"):
-            raise ValueError("normalizer must be 'hamming' or 'exact'")
+        if normalizer not in NORMALIZERS:
+            raise ValueError(f"normalizer must be one of {NORMALIZERS}")
+        if mc_samples < 1:
+            raise ValueError("mc_samples must be >= 1")
         self.G = n_components
         self.K = n_components - int(self.has_noise)          # non-noise components
         if self.K < 1:
@@ -61,6 +74,8 @@ class BaseEDM(nn.Module):
         self.T, self.v, self.r = seq_len, n_states, n_covariates
         self.normalizer = normalizer
         self.straight_through = straight_through
+        self.mc_samples = mc_samples
+        self.generator: torch.Generator | None = None    # RNG for the "sampled" normaliser
 
         self.theta_logits = nn.Parameter(0.01 * torch.randn(self.K, self.T, self.v))
         self._build_precision(init_precision)
@@ -107,12 +122,52 @@ class BaseEDM(nn.Module):
         return self._masked_logits().argmax(-1)
 
     # ---- likelihood ----------------------------------------------------------------
+    @staticmethod
+    def _state_log_weights(lam: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+        """-λ_{g,t}(1 - θ̃_{g,t,k}), shape (K, T, v): log f̃_g(s) = Σ_t of this at k = s_t."""
+        return -lam.unsqueeze(-1) * (1.0 - p)
+
     def log_normalizer(self, lam: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
         """log Ψ per non-noise component, shape (K,)."""
         if self.normalizer == "hamming":
             # log((v-1)e^{-λ} + 1) = softplus(log(v-1) - λ), numerically stable for large λ
             return F.softplus(math.log(self.v - 1) - lam).sum(-1)
-        return torch.logsumexp(-lam.unsqueeze(-1) * (1.0 - p), dim=-1).sum(-1)
+        log_w = self._state_log_weights(lam, p)                        # (K, T, v)
+        log_z = torch.logsumexp(log_w, dim=-1).sum(-1)                 # exact log Z_g
+        if self.normalizer == "exact" or not (torch.is_grad_enabled() and log_w.requires_grad):
+            return log_z
+        # Equation 18.13: ∇ log Z_g = E_{s ~ f_g}[∇ log f̃_g(s)]. Average log f̃_g over sequences
+        # drawn from f_g (no gradient through the draw) so autograd returns the Monte Carlo
+        # estimate of that expectation. Adding it as (x - x.detach()) leaves the forward value
+        # at the exact log Z_g, which the responsibilities and the reported loss still need.
+        samples = self._sample_from_log_weights(log_w.detach(), self.mc_samples, self.generator)
+        x_neg = F.one_hot(samples, self.v).to(log_w.dtype)            # (K, S, T, v)
+        neg_phase = (x_neg * log_w.unsqueeze(1)).sum((-1, -2)).mean(1)  # (1/S) Σ_j log f̃_g(s̃_j)
+        return log_z.detach() + (neg_phase - neg_phase.detach())
+
+    @staticmethod
+    def _sample_from_log_weights(log_w: torch.Tensor, n: int,
+                                 generator: torch.Generator | None = None) -> torch.Tensor:
+        """n draws from each component, shape (K, n, T).
+
+        A component is a product of independent categoricals over time points, so each s_t is
+        drawn directly from softmax(log_w[g, t]); the samples are exact, with no Markov chain.
+        """
+        K, T, v = log_w.shape
+        probs = torch.softmax(log_w, dim=-1).reshape(K * T, v)
+        draws = torch.multinomial(probs, n, replacement=True, generator=generator)  # (K*T, n)
+        return draws.reshape(K, T, n).transpose(1, 2)
+
+    @torch.no_grad()
+    def sample_components(self, n: int, hard: bool = True,
+                          generator: torch.Generator | None = None) -> torch.Tensor:
+        """Draw n sequences from every non-noise component f_g, shape (K, n, T).
+
+        hard=True samples the reported model (one-hot θ); hard=False samples the normalised
+        soft-θ̃ component, the distribution the "sampled" normaliser draws from in training.
+        """
+        log_w = self._state_log_weights(self.precision(), self.theta(hard))
+        return self._sample_from_log_weights(log_w, n, generator)
 
     def component_log_prob(self, X: torch.Tensor, hard: bool = False) -> torch.Tensor:
         """log f_g(s_i) for the non-noise components, shape (n, K). X is one-hot (n, T, v)."""

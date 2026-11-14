@@ -31,9 +31,9 @@ def collapse_duplicates(sequences, covariates, weights):
     The weighted (pseudo) likelihood is unchanged, but each epoch touches fewer rows.
     """
     T = sequences.shape[1]
-    key = sequences.double()
+    key = sequences
     if covariates is not None:
-        key = torch.cat([key, covariates.double()], dim=1)
+        key = torch.cat([key, covariates], dim=1)
     uniq, inverse = torch.unique(key, dim=0, return_inverse=True)
     w = weights.new_zeros(uniq.shape[0]).index_add_(0, inverse, weights)
     seq_u = uniq[:, :T].long()

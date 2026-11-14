@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 
-from edm import EDModel, EDMType
+from edm import NORMALIZERS, EDModel, EDMType
 
 # CSV state labels -> the short codes used in the paper's figures
 STATES = {
@@ -200,6 +200,10 @@ def parse_args():
     p.add_argument("--covariates", default="all", help="'all', 'none' or comma-separated, e.g. GCSE5eq")
     p.add_argument("--no-weights", action="store_true", help="ignore the sampling weights")
     p.add_argument("--gated-noise", action="store_true", help="GN gate instead of the default NGN")
+    p.add_argument("--normalizer", choices=NORMALIZERS, default="hamming",
+                   help="'sampled' estimates ∇log Z by Monte Carlo (Deep Learning, eq. 18.13)")
+    p.add_argument("--mc-samples", type=int, default=32,
+                   help="sequences drawn per component per step with --normalizer sampled")
     p.add_argument("--n-init", type=int, default=3)
     p.add_argument("--epochs", type=int, default=600)
     p.add_argument("--lr", type=float, default=0.05)
@@ -231,7 +235,8 @@ def main():
         table, best = fit_family(
             S, None if args.no_weights else w, cov, len(alphabet), types,
             range(args.g_min, args.g_max + 1),
-            model_kwargs={"gated_noise": args.gated_noise},
+            model_kwargs={"gated_noise": args.gated_noise, "normalizer": args.normalizer,
+                          "mc_samples": args.mc_samples},
             fit_kwargs=dict(epochs=args.epochs, lr=args.lr, n_init=args.n_init,
                             seed=args.seed, device=args.device),
             table_path=out / "bic_table.csv",
